@@ -12,11 +12,6 @@ dataset/labels/augmented/
 # Python cache
 __pycache__/
 *.pyc
-# YOLO output files
-runs/
-runs/*
 
-# YOLO weights
-*.pt
 # Virtual environment
 venv/
