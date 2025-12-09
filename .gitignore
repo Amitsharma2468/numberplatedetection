@@ -1,0 +1,21 @@
+# Ignore dataset images and labels
+dataset/images/
+dataset/labels/
+
+plate_labels
+
+# Optional: ignore temporary or augmented images
+dataset/images/augmented/
+dataset/labels/augmented/
+
+# Python cache
+__pycache__/
+*.pyc
+# YOLO output files
+runs/
+runs/*
+
+# YOLO weights
+*.pt
+# Virtual environment
+venv/
