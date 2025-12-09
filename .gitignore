@@ -3,6 +3,7 @@ dataset/images/
 dataset/labels/
 
 plate_labels
+vehicle_images
 
 # Optional: ignore temporary or augmented images
 dataset/images/augmented/
