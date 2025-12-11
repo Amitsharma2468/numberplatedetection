@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Plate Detection</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Upload Section -->
+  <!-- Wrapped in form with onsubmit="return false" to prevent any reload -->
+  <section id="upload-section">
+    <h1>Upload Video for Plate Detection</h1>
+    <form id="upload-form" onsubmit="return false;">
+      <input type="file" id="video-upload" accept="video/*">
+      <button id="upload-btn" type="button" disabled>Analyze Video</button>
+    </form>
+  </section>
+
+  <!-- Results Section (hidden initially) -->
+  <section id="result-section" style="display: none;">
+    <h1>Detected Plates</h1>
+    <div id="results"></div>
+    <a id="download-btn" href="#" target="_blank">Download Video</a>
+    <button id="new-upload-btn" type="button">New Upload</button>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

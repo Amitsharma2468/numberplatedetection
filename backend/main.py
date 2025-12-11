@@ -1,103 +1,205 @@
-# backend/main.py
-from fastapi import FastAPI, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
-from plate_detector import detect_plate
+import tempfile
+
 import shutil
+
 import os
-import cv2
-import easyocr
+
+import uuid
+
+from fastapi import FastAPI, UploadFile, File
+
+from fastapi.responses import JSONResponse, FileResponse
+
+from fastapi.middleware.cors import CORSMiddleware
+
+from starlette.background import BackgroundTask
+
+from starlette.concurrency import run_in_threadpool
+
+from plate_detector import detect_plate_video  # Your YOLO + OCR function
+
+
 
 app = FastAPI()
 
-# Allow all origins for testing
 app.add_middleware(
+
     CORSMiddleware,
+
     allow_origins=["*"],
+
     allow_methods=["*"],
+
     allow_headers=["*"]
+
 )
 
-# EasyOCR reader for Bengali
-reader = easyocr.Reader(['bn'])
 
-# Minimal Bangla to Avro mapping (extend as needed)
-BN_TO_AVRO = {
-    'অ': 'a', 'আ': 'aa', 'ই': 'i', 'ঈ': 'ii', 'উ': 'u', 'ঊ': 'uu',
-    'এ': 'e', 'ঐ': 'oi', 'ও': 'o', 'ঔ': 'ou',
-    'ক': 'k', 'খ': 'kh', 'গ': 'g', 'ঘ': 'gh', 'ঙ': 'ng',
-    'চ': 'c', 'ছ': 'ch', 'জ': 'j', 'ঝ': 'jh', 'ঞ': 'n',
-    'ট': 'T', 'ঠ': 'Th', 'ড': 'D', 'ঢ': 'Dh', 'ণ': 'N',
-    'ত': 't', 'থ': 'th', 'দ': 'd', 'ধ': 'dh', 'ন': 'n',
-    'প': 'p', 'ফ': 'ph', 'ব': 'b', 'ভ': 'bh', 'ম': 'm',
-    'য': 'y', 'র': 'r', 'ল': 'l', 'শ': 'sh', 'ষ': 'Sh',
-    'স': 's', 'হ': 'h', 'ং': 'ng', 'ঃ': ':', 'ঁ': '~',
-    'ড়': 'r', 'ঢ়': 'rh', 'য়': 'y',
-    '।': '.', '০': '0', '১': '1', '২': '2', '৩': '3',
-    '৪': '4', '৫': '5', '৬': '6', '৭': '7', '৮': '8', '৯': '9'
-}
 
-def bangla_to_avro(text: str) -> str:
-    """Convert Bangla text to Avro phonetic typing."""
-    result = ""
-    for c in text:
-        result += BN_TO_AVRO.get(c, c)  # Keep unknown chars as-is
-    return result
+# Store processed videos and car info in memory
 
-@app.get("/api/health")
-def health():
-    return {"status": "ok"}
+processed_videos = {}   # session_id -> video_path
 
-@app.post("/api/detect-plate")
-async def detect_plate_api(file: UploadFile = File(...)):
-    temp_path = "temp_input.jpg"
-    output_path = "temp_output.jpg"
+processed_cars = {}     # session_id -> [{"car_id":1,"plate":"AB123"}]
 
-    # Save uploaded file
-    with open(temp_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+
+
+
+
+@app.post("/api/detect-plate-video")
+
+async def detect_plate_video_api(file: UploadFile = File(...)):
+
+    session_id = str(uuid.uuid4())
+
+
+
+    # Save uploaded video temporarily
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_input:
+
+        input_path = temp_input.name
+
+        shutil.copyfileobj(file.file, temp_input)
+
+    await file.close()
+
+
+
+    output_path = f"output_with_boxes_{session_id}.mp4"
+
+
 
     try:
-        # Detect plates
-        boxes, conf = detect_plate(temp_path)
 
-        # Load image
-        img = cv2.imread(temp_path)
-        detected_texts = []
-        detected_avro = []
+        # Run detection in thread pool
 
-        for box in boxes.tolist():
-            x1, y1, x2, y2 = map(int, box)
-            pad = 3
-            x1 = max(0, x1 - pad)
-            y1 = max(0, y1 - pad)
-            x2 = min(img.shape[1], x2 + pad)
-            y2 = min(img.shape[0], y2 + pad)
+        success, car_results = await run_in_threadpool(detect_plate_video, input_path, output_path)
 
-            # Crop plate region
-            plate_img = img[y1:y2, x1:x2]
-            plate_gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
 
-            # OCR with EasyOCR
-            result = reader.readtext(plate_gray)
-            plate_text = "".join([text[1] for text in result])
-            detected_texts.append(plate_text)
 
-            # Convert to Avro typing
-            detected_avro.append(bangla_to_avro(plate_text))
+        if not success or not os.path.exists(output_path):
 
-            # Draw bounding box
-            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            return JSONResponse(status_code=500, content={"error": "Video processing failed"})
 
-        # Save annotated image
-        cv2.imwrite(output_path, img)
 
-        return JSONResponse({
-            "plates": detected_texts,            # Bangla text       # Avro typing
-            "image_path": output_path            # Annotated image
-        })
+
+        # Convert to list of dicts
+
+        cars_output = [{"car_id": int(cid), "plate": plate} for cid, plate in car_results.items()]
+
+        processed_videos[session_id] = output_path
+
+        processed_cars[session_id] = cars_output
+
+
+
+        return JSONResponse(
+
+            status_code=200,
+
+            content={
+
+                "message": "Video processed successfully",
+
+                "count": len(cars_output),
+
+                "cars": cars_output,
+
+                "session_id": session_id,
+
+                "download_url": f"/download-video/{session_id}"
+
+            }
+
+        )
 
     finally:
-        # Clean temp input
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+
+        # Remove input video after processing
+
+        try:
+
+            os.remove(input_path)
+
+        except Exception as e:
+
+            print(f"Failed to remove input file: {e}")
+
+
+
+
+
+@app.get("/download-video/{session_id}")
+
+async def download_video(session_id: str):
+
+    video_path = processed_videos.get(session_id)
+
+    if not video_path or not os.path.exists(video_path):
+
+        return JSONResponse(status_code=404, content={"error": "Processed video not found"})
+
+
+
+    # Optional cleanup after download
+
+    def cleanup(path, sid):
+
+        try:
+
+            os.remove(path)
+
+        except Exception as e:
+
+            print(f"Failed to delete output video: {e}")
+
+        processed_videos.pop(sid, None)
+
+        processed_cars.pop(sid, None)
+
+
+
+    return FileResponse(
+
+        path=video_path,
+
+        media_type="video/mp4",
+
+        filename="detected_plate_video.mp4",
+
+        background=BackgroundTask(cleanup, video_path, session_id)
+
+    )
+
+
+
+
+
+# ----------------- NEW: Get video info -----------------
+
+@app.get("/api/get-video-info/{session_id}")
+
+async def get_video_info(session_id: str):
+
+    cars_info = processed_cars.get(session_id)
+
+    if cars_info is None:
+
+        return JSONResponse(status_code=404, content={"error": "Session not found or expired"})
+
+
+
+    return JSONResponse(
+
+        status_code=200,
+
+        content={
+
+            "session_id": session_id,
+
+            "cars": cars_info
+
+        }
+
+    )
